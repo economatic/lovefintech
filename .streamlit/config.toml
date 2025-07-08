@@ -1,0 +1,11 @@
+[server]
+port = 8501
+enableCORS = true
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
