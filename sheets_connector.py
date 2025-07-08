@@ -1,88 +1,67 @@
-# sheets_connector.py
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-from datetime import datetime
-import os # Importe o módulo 'os' para manipulação de caminhos de arquivo
+import streamlit as st
+import json # Importar o módulo json para lidar com strings JSON
 
-# Autenticacao com Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# Carregar credenciais do Google Sheets
+# A forma como as credenciais são carregadas depende do ambiente:
+# 1. No Streamlit Cloud, elas são carregadas dos segredos (st.secrets).
+# 2. Localmente, elas podem ser carregadas de um arquivo .json (para desenvolvimento).
 
-# Constrói o caminho completo para credentials.json, sempre a partir do diretório deste arquivo
-# Isso garante que o arquivo seja encontrado, independentemente do diretório de onde o script é executado.
-caminho_credenciais = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json")
+# Tenta carregar as credenciais dos segredos do Streamlit Cloud
+# Se estiver no Streamlit Cloud, st.secrets["GOOGLE_SHEETS_CREDENTIALS"] estará disponível.
+# Caso contrário, ele tentará carregar de um arquivo local.
+try:
+    # No Streamlit Cloud, st.secrets é a forma segura de acessar segredos.
+    # O segredo é armazenado como uma string JSON, então precisamos fazer o parse.
+    google_sheets_credentials = json.loads(st.secrets["GOOGLE_SHEETS_CREDENTIALS"])
+    gc = gspread.service_account_from_dict(google_sheets_credentials)
+    st.success("Credenciais carregadas do Streamlit Secrets!") # Mensagem de depuração
+except Exception as e:
+    st.warning(f"Não foi possível carregar credenciais do Streamlit Secrets: {e}") # Mensagem de depuração
+    st.warning("Tentando carregar credenciais de 'credentials.json' localmente...")
+    try:
+        # Para desenvolvimento local, carregue do arquivo credentials.json
+        # Certifique-se de que credentials.json está no .gitignore!
+        gc = gspread.service_account(filename='credentials.json')
+        st.success("Credenciais carregadas de 'credentials.json' localmente!") # Mensagem de depuração
+    except Exception as e_local:
+        st.error(f"Erro ao carregar credenciais de 'credentials.json' localmente: {e_local}")
+        st.stop() # Interrompe a execução do app se as credenciais não puderem ser carregadas
 
-# Autentica usando o caminho completo do arquivo de credenciais
-creds = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, scope)
-client = gspread.authorize(creds)
+# Abra a planilha pelo nome
+try:
+    spreadsheet = gc.open("financas_casal")
+    worksheet = spreadsheet.worksheet("dados")
+except Exception as e:
+    st.error(f"Erro ao abrir a planilha 'financas_casal' ou a aba 'dados': {e}")
+    st.stop() # Interrompe a execução do app se a planilha não puder ser acessada
 
-# Nome da planilha e da aba
-NOME_PLANILHA = "Base Lovefintech"
-ABA = "Sheet1"
-
-# Acesso à planilha e aba
-def get_sheet():
-    """Retorna a aba específica da planilha do Google Sheets."""
-    sheet = client.open(NOME_PLANILHA).worksheet(ABA)
-    return sheet
-
-# Salvar novo dado
 def salvar_dado(usuario, data, tipo, categoria, descricao, valor, forma_pgto):
     """
-    Salva um novo registro na planilha do Google Sheets.
-
-    Args:
-        usuario (str): Nome do usuário.
-        data (datetime.date): Data do lançamento.
-        tipo (str): Tipo do lançamento (ex: 'Receita', 'Despesa').
-        categoria (str): Categoria do lançamento.
-        descricao (str): Descrição detalhada.
-        valor (float): Valor do lançamento.
-        forma_pgto (str): Forma de pagamento.
+    Salva um novo lançamento financeiro na planilha Google Sheets.
     """
-    sheet = get_sheet()
-    nova_linha = [
-        str(datetime.now()), # Timestamp do registro
-        usuario,
-        data.strftime("%Y-%m-%d"), # Formata a data para YYYY-MM-DD
-        tipo,
-        categoria,
-        descricao,
-        f"{valor:.2f}", # Formata o valor com 2 casas decimais
-        forma_pgto
-    ]
-    sheet.append_row(nova_linha)
+    try:
+        # Formata a data para string para salvar na planilha
+        data_str = data.strftime("%Y-%m-%d")
+        
+        # Adiciona uma nova linha com os dados
+        worksheet.append_row([usuario, data_str, tipo, categoria, descricao, valor, forma_pgto])
+    except Exception as e:
+        st.error(f"Erro ao salvar dado na planilha: {e}")
 
-# Carregar dados do Google Sheets
+@st.cache_data(ttl=600) # Cache os dados por 10 minutos
 def carregar_dados():
     """
-    Carrega todos os dados da planilha e os retorna como um DataFrame do Pandas.
-    Converte colunas 'Valor' e 'Data' para seus tipos corretos,
-    tratando casos onde a planilha está vazia ou colunas essenciais não existem.
+    Carrega todos os dados da planilha Google Sheets.
     """
-    sheet = get_sheet()
-    dados = sheet.get_all_records() # Obtém todos os dados como uma lista de dicionários
+    try:
+        # Obtém todos os registros como uma lista de dicionários
+        data = worksheet.get_all_records()
+        # Converte para DataFrame do pandas
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar dados da planilha: {e}")
+        return pd.DataFrame() # Retorna um DataFrame vazio em caso de erro
 
-    # Se a lista de dicionários estiver vazia (planilha vazia), retorna um DataFrame vazio
-    if not dados:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(dados) # Converte para DataFrame
-
-    # Verifica se a coluna 'Valor' existe antes de tentar acessá-la
-    if 'Valor' not in df.columns:
-        # Se a coluna 'Valor' não existir, retorna um DataFrame vazio
-        return pd.DataFrame()
-
-    # Converte 'Valor' para numérico, tratando erros (valores não numéricos se tornarão NaN)
-    df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce')
-
-    # Verifica se a coluna 'Data' existe antes de tentar acessá-la
-    if 'Data' not in df.columns:
-        # Se a coluna 'Data' não existir, retorna um DataFrame vazio
-        return pd.DataFrame()
-        
-    # Converte 'Data' para datetime, tratando erros (datas inválidas se tornarão NaT)
-    df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-    
-    return df
