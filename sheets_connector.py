@@ -1,25 +1,18 @@
 import gspread
 import pandas as pd
 import streamlit as st
-import json # Importar o módulo json para lidar com strings JSON
+# O módulo json não é mais estritamente necessário aqui se st.secrets já entrega um dict ou se não estamos parseando string
+# import json
 
 # Carregar credenciais do Google Sheets
-# A forma como as credenciais são carregadas depende do ambiente:
-# 1. No Streamlit Cloud, elas são carregadas dos segredos (st.secrets).
-# 2. Localmente, elas podem ser carregadas de um arquivo .json (para desenvolvimento).
-
-# Tenta carregar as credenciais dos segredos do Streamlit Cloud
-# Se estiver no Streamlit Cloud, st.secrets["GOOGLE_SHEETS_CREDENTIALS"] estará disponível.
-# Caso contrário, ele tentará carregar de um arquivo local.
+# Tenta carregar as credenciais dos segredos do Streamlit (st.secrets) primeiro
 try:
-    # No Streamlit Cloud, st.secrets é a forma segura de acessar segredos.
-    # O segredo é armazenado como uma string JSON, então precisamos fazer o parse.
-    google_sheets_credentials = json.loads(st.secrets["GOOGLE_SHEETS_CREDENTIALS"])
-    gc = gspread.service_account_from_dict(google_sheets_credentials)
+    # Acessa as credenciais do TOML, usando a chave correta [google_credentials]
+    gc = gspread.service_account_from_dict(st.secrets["google_credentials"])
     st.success("Credenciais carregadas do Streamlit Secrets!") # Mensagem de depuração
 except Exception as e:
     st.warning(f"Não foi possível carregar credenciais do Streamlit Secrets: {e}") # Mensagem de depuração
-    st.warning("Tentando carregar credenciais de 'credentials.json' localmente...")
+    st.info("Tentando carregar credenciais de 'credentials.json' localmente...")
     try:
         # Para desenvolvimento local, carregue do arquivo credentials.json
         # Certifique-se de que credentials.json está no .gitignore!
@@ -31,10 +24,11 @@ except Exception as e:
 
 # Abra a planilha pelo nome
 try:
-    spreadsheet = gc.open("financas_casal")
-    worksheet = spreadsheet.worksheet("dados")
+    # Certifique-se que o nome da planilha e aba estão corretos
+    spreadsheet = gc.open("Base Lovefintech") # O nome da sua planilha
+    worksheet = spreadsheet.worksheet("Sheet1") # O nome da sua aba
 except Exception as e:
-    st.error(f"Erro ao abrir a planilha 'financas_casal' ou a aba 'dados': {e}")
+    st.error(f"Erro ao abrir a planilha 'Base Lovefintech' ou a aba 'Sheet1': {e}") # Mensagem de erro atualizada para corresponder aos nomes da planilha e aba
     st.stop() # Interrompe a execução do app se a planilha não puder ser acessada
 
 def salvar_dado(usuario, data, tipo, categoria, descricao, valor, forma_pgto):
@@ -64,4 +58,3 @@ def carregar_dados():
     except Exception as e:
         st.error(f"Erro ao carregar dados da planilha: {e}")
         return pd.DataFrame() # Retorna um DataFrame vazio em caso de erro
-
